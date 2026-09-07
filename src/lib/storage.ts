@@ -27,18 +27,37 @@ function readJson(key: string): unknown {
 	}
 }
 
-export function loadPlans(): PlansByDate {
-	const data = readJson(PLANS_KEY);
-	if (!isRecord(data)) return {};
+function parsePlans(data: unknown): { plans: PlansByDate; skipped: number } {
+	if (!isRecord(data)) return { plans: {}, skipped: 0 };
 	const plans: PlansByDate = {};
-	for (const [date, value] of Object.entries(data)) {
-		if (!isRecord(value) || !Array.isArray(value.blocks)) continue;
-		plans[date] = {
-			date: typeof value.date === 'string' ? value.date : date,
-			blocks: value.blocks as DayPlan['blocks'],
-		};
+	let skipped = 0;
+	for (const [key, value] of Object.entries(data)) {
+		if (!isRecord(value) || !Array.isArray(value.blocks)) {
+			skipped += 1;
+			continue;
+		}
+		const date = typeof value.date === 'string' && value.date ? value.date : key;
+		plans[date] = { date, blocks: value.blocks as DayPlan['blocks'] };
 	}
-	return plans;
+	return { plans, skipped };
+}
+
+function parseSettings(data: unknown): Settings {
+	if (!isRecord(data)) return { ...DEFAULT_SETTINGS, customThemes: [] };
+	return {
+		hour12: data.hour12 === true,
+		themeId: typeof data.themeId === 'string' ? data.themeId : DEFAULT_SETTINGS.themeId,
+		customThemes: Array.isArray(data.customThemes)
+			? (data.customThemes as Settings['customThemes'])
+			: [],
+		dayStart: typeof data.dayStart === 'string' ? data.dayStart : DEFAULT_SETTINGS.dayStart,
+		dayEnd: typeof data.dayEnd === 'string' ? data.dayEnd : DEFAULT_SETTINGS.dayEnd,
+		view: parseView(data.view),
+	};
+}
+
+export function loadPlans(): PlansByDate {
+	return parsePlans(readJson(PLANS_KEY)).plans;
 }
 
 export function savePlans(plans: PlansByDate): void {
@@ -50,17 +69,36 @@ export function savePlans(plans: PlansByDate): void {
 }
 
 export function loadSettings(): Settings {
-	const data = readJson(SETTINGS_KEY);
-	if (!isRecord(data)) return { ...DEFAULT_SETTINGS, customThemes: [] };
+	return parseSettings(readJson(SETTINGS_KEY));
+}
+
+export interface PlannerExport {
+	version: 1;
+	exportedAt: string;
+	plans: PlansByDate;
+	settings: Settings;
+}
+
+export function buildExport(plans: PlansByDate, settings: Settings): PlannerExport {
+	return { version: 1, exportedAt: new Date().toISOString(), plans, settings };
+}
+
+export interface ImportedExport {
+	plans: PlansByDate;
+	settings: Settings;
+	importedDayCount: number;
+	skippedEntryCount: number;
+}
+
+export function parseImportedExport(raw: unknown): ImportedExport | null {
+	if (!isRecord(raw)) return null;
+	if (!('plans' in raw) && !('settings' in raw)) return null;
+	const { plans, skipped } = parsePlans(raw.plans);
 	return {
-		hour12: data.hour12 === true,
-		themeId: typeof data.themeId === 'string' ? data.themeId : DEFAULT_SETTINGS.themeId,
-		customThemes: Array.isArray(data.customThemes)
-			? (data.customThemes as Settings['customThemes'])
-			: [],
-		dayStart: typeof data.dayStart === 'string' ? data.dayStart : DEFAULT_SETTINGS.dayStart,
-		dayEnd: typeof data.dayEnd === 'string' ? data.dayEnd : DEFAULT_SETTINGS.dayEnd,
-		view: parseView(data.view),
+		plans,
+		settings: parseSettings(raw.settings),
+		importedDayCount: Object.keys(plans).length,
+		skippedEntryCount: skipped,
 	};
 }
 

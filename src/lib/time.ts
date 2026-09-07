@@ -84,6 +84,14 @@ export function addDays(isoDate: string, delta: number): string {
 	return toISODate(date);
 }
 
+export function diffDays(from: string, to: string): number {
+	const [fy, fm, fd] = from.split('-').map(Number);
+	const [ty, tm, td] = to.split('-').map(Number);
+	const fromMs = new Date(fy, fm - 1, fd).getTime();
+	const toMs = new Date(ty, tm - 1, td).getTime();
+	return Math.round((toMs - fromMs) / 86_400_000);
+}
+
 export function formatLongDate(isoDate: string): string {
 	const [year, month, day] = isoDate.split('-').map(Number);
 	return new Date(year, month - 1, day).toLocaleDateString(undefined, {

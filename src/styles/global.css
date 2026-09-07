@@ -59,7 +59,12 @@
 	--focus-ring: 0 0 0 2px var(--canvas), 0 0 0 4px var(--accent);
 }
 
+:root[data-theme='light'] {
+	color-scheme: light;
+}
+
 :root[data-theme='dark'] {
+	color-scheme: dark;
 	--ink: #ededed;
 	--body: #a1a1a1;
 	--mute: #737373;
@@ -96,6 +101,7 @@
 
 @media (prefers-color-scheme: dark) {
 	:root:not([data-theme='light']):not([data-theme='custom']) {
+		color-scheme: dark;
 		--ink: #ededed;
 		--body: #a1a1a1;
 		--mute: #737373;
@@ -331,7 +337,6 @@ svg {
 	background: var(--surface);
 	border: 1px solid var(--border);
 	border-radius: var(--radius-sm);
-	color-scheme: light dark;
 }
 
 .input-sm,

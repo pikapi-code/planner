@@ -142,11 +142,13 @@ function subtaskItem(block: TimeBlock, subtask: Subtask, state: AppState): strin
 			<label class="check">
 				<input
 					type="checkbox"
+					class="check-input"
 					data-action="toggle-subtask"
 					data-block-id="${attr(block.id)}"
 					data-subtask-id="${attr(subtask.id)}"
 					${subtask.completed ? 'checked' : ''}
 				/>
+				<span class="check-box" aria-hidden="true"></span>
 				<span class="sr-only">Complete ${esc(title)}</span>
 			</label>
 			${
@@ -203,7 +205,13 @@ function colorPicker(blockId: string, selectedId: string): string {
 	`;
 }
 
-function renderBlock(block: TimeBlock, state: AppState, next?: TimeBlock): string {
+function renderBlock(
+	block: TimeBlock,
+	state: AppState,
+	next?: TimeBlock,
+	isFirst = false,
+	isLast = false,
+): string {
 	const hour12 = state.settings.hour12;
 	const status = derivedStatus(block, state.date, todayISO(), state.ui.nowMinutes);
 	const editing = state.ui.editing;
@@ -270,13 +278,35 @@ function renderBlock(block: TimeBlock, state: AppState, next?: TimeBlock): strin
 					<label class="check complete-task">
 						<input
 							type="checkbox"
+							class="check-input"
 							data-action="toggle-block"
 							data-block-id="${attr(block.id)}"
 							${block.status === 'completed' ? 'checked' : ''}
 						/>
+						<span class="check-box" aria-hidden="true"></span>
 						<span>Complete</span>
 					</label>
 					${status === 'in-progress' ? '<span class="badge now-badge">Now</span>' : ''}
+					<div class="reorder-group">
+						<button
+							type="button"
+							class="icon-btn icon-btn-xs"
+							data-action="move-block-up"
+							data-block-id="${attr(block.id)}"
+							aria-label="Move task up"
+							title="Move up"
+							${isFirst ? 'disabled' : ''}
+						>↑</button>
+						<button
+							type="button"
+							class="icon-btn icon-btn-xs"
+							data-action="move-block-down"
+							data-block-id="${attr(block.id)}"
+							aria-label="Move task down"
+							title="Move down"
+							${isLast ? 'disabled' : ''}
+						>↓</button>
+					</div>
 					<div class="menu-wrap">
 						<button
 							type="button"
@@ -292,6 +322,12 @@ function renderBlock(block: TimeBlock, state: AppState, next?: TimeBlock): strin
 								? `<div class="menu" role="menu">
 									<button type="button" role="menuitem" data-action="edit-start" data-block-id="${attr(block.id)}">Edit time</button>
 									<button type="button" role="menuitem" data-action="duplicate-block" data-block-id="${attr(block.id)}">Duplicate</button>
+									<div class="menu-divider" role="none"></div>
+									<div class="menu-color-row" role="none">
+										<span class="menu-label">Color</span>
+										${colorPicker(block.id, color.id)}
+									</div>
+									<div class="menu-divider" role="none"></div>
 									<button type="button" role="menuitem" class="danger" data-action="ask-delete-block" data-block-id="${attr(block.id)}">Delete</button>
 								</div>`
 								: ''
@@ -331,7 +367,6 @@ function renderBlock(block: TimeBlock, state: AppState, next?: TimeBlock): strin
 					${progress.total > 0 ? `<span class="progress">${progress.done} / ${progress.total}</span>` : ''}
 					${overlaps ? '<span class="hint">Overlaps</span>' : ''}
 					${allSubtasksDone && block.status !== 'completed' ? '<span class="hint">All subtasks done</span>' : ''}
-					${colorPicker(block.id, color.id)}
 				</div>
 			</div>
 
@@ -525,6 +560,69 @@ function renderSettings(state: AppState): string {
 	`;
 }
 
+function renderShortcuts(state: AppState): string {
+	if (!state.ui.shortcutsOpen) return '';
+	const groups: { title: string; rows: [string, string][] }[] = [
+		{
+			title: 'Navigate',
+			rows: [
+				['←  →', 'Previous / next day (or month)'],
+				['↑  ↓', 'Select previous / next block'],
+				['T', 'Jump to today'],
+				['Click a date', 'Open the date picker'],
+			],
+		},
+		{
+			title: 'Edit',
+			rows: [
+				['N', 'Add a new time block'],
+				['Enter', 'Edit the selected block’s task'],
+				['↑ ↓ ← →', 'While editing, move between the task and its subtasks'],
+				['Enter (while editing)', 'Add a new subtask'],
+				['Delete / Backspace', 'Delete the selected block'],
+				['Esc', 'Close editing, menus, or dialogs'],
+			],
+		},
+		{
+			title: 'Other',
+			rows: [
+				['?', 'Toggle this shortcuts panel'],
+				['Drag the grip', 'Reorder blocks or subtasks'],
+			],
+		},
+	];
+	return `
+		<div class="modal-backdrop" data-action="close-shortcuts"></div>
+		<div class="modal card shortcuts-modal" role="dialog" aria-labelledby="shortcuts-title" aria-modal="true">
+			<div class="drawer-head">
+				<h2 id="shortcuts-title">Keyboard shortcuts</h2>
+				<button type="button" class="icon-btn" data-action="close-shortcuts" aria-label="Close shortcuts">×</button>
+			</div>
+			${groups
+				.map(
+					(group) => `
+					<div class="shortcuts-group">
+						<h3>${esc(group.title)}</h3>
+						<dl class="shortcuts-list">
+							${group.rows
+								.map(
+									([keys, description]) => `
+										<div class="shortcuts-row">
+											<dt><kbd>${esc(keys)}</kbd></dt>
+											<dd>${esc(description)}</dd>
+										</div>
+									`,
+								)
+								.join('')}
+						</dl>
+					</div>
+				`,
+				)
+				.join('')}
+		</div>
+	`;
+}
+
 function renderDialog(state: AppState): string {
 	if (state.ui.dialog?.type !== 'delete-block') return '';
 	return `
@@ -547,7 +645,7 @@ function viewSwitcher(view: PlannerView): string {
 		{ id: 'month', label: 'Month' },
 	];
 	return `
-		<div class="segmented" role="tablist" aria-label="Planner view">
+		<div class="segmented view-switcher" role="tablist" aria-label="Planner view">
 			${buttons
 				.map(
 					(button) =>
@@ -629,7 +727,17 @@ function renderDayView(state: AppState, planBlocks: TimeBlock[]): string {
 					</div>
 				</div>
 			</div>
-			${selected ? `<div class="cal-detail">${renderBlock(selected, state)}</div>` : ''}
+			${
+				selected
+					? `<div class="cal-detail">${renderBlock(
+							selected,
+							state,
+							undefined,
+							planBlocks[0]?.id === selected.id,
+							planBlocks[planBlocks.length - 1]?.id === selected.id,
+						)}</div>`
+					: ''
+			}
 			${renderComposer(state)}
 		</section>
 	`;
@@ -727,7 +835,11 @@ function renderPlannerBody(state: AppState, planBlocks: TimeBlock[]): string {
 				<span>Subtasks</span>
 			</div>
 			${showNow && shouldShowNowBefore(planBlocks, state.ui.nowMinutes) ? renderNowLabeled(state.settings.hour12) : ''}
-			${planBlocks.map((block, index) => renderBlock(block, state, planBlocks[index + 1])).join('')}
+			${planBlocks
+				.map((block, index) =>
+					renderBlock(block, state, planBlocks[index + 1], index === 0, index === planBlocks.length - 1),
+				)
+				.join('')}
 			${showNow && shouldShowNowAfter(planBlocks, state.ui.nowMinutes) ? renderNowLabeled(state.settings.hour12) : ''}
 			${renderComposer(state)}
 		</section>
@@ -753,11 +865,54 @@ export function renderApp(state: AppState): string {
 					</div>
 					<div class="header-actions">
 						${viewSwitcher(state.settings.view)}
-						<div class="segmented" role="group" aria-label="Time format">
-							<button type="button" class="${state.settings.hour12 ? 'is-active' : ''}" data-action="set-hour12" data-value="true">12h</button>
-							<button type="button" class="${!state.settings.hour12 ? 'is-active' : ''}" data-action="set-hour12" data-value="false">24h</button>
+						<div class="header-menu-wrap">
+							<button
+								type="button"
+								class="icon-btn icon-btn-header"
+								data-action="toggle-io-menu"
+								aria-haspopup="menu"
+								aria-expanded="${state.ui.headerMenu === 'io' ? 'true' : 'false'}"
+								aria-label="Import or export data"
+								title="Import / export data"
+							>↕</button>
+							${
+								state.ui.headerMenu === 'io'
+									? `
+								<div class="menu" role="menu">
+									<button type="button" role="menuitem" data-action="export-data" title="Export all plans and settings as a JSON file">Export data</button>
+									<button type="button" role="menuitem" data-action="trigger-import" title="Import a JSON file (merges plans by date, replaces settings)">Import data</button>
+								</div>
+							`
+									: ''
+							}
 						</div>
-						<button type="button" class="btn btn-ghost btn-sm" data-action="open-settings">Themes</button>
+						<input type="file" accept="application/json" class="sr-only" data-action="import-file-input" tabindex="-1" aria-hidden="true" />
+						<button type="button" class="icon-btn icon-btn-header" data-action="open-shortcuts" aria-label="Keyboard shortcuts" title="Keyboard shortcuts">⌨</button>
+						<div class="header-menu-wrap">
+							<button
+								type="button"
+								class="icon-btn icon-btn-header"
+								data-action="toggle-theme-menu"
+								aria-haspopup="menu"
+								aria-expanded="${state.ui.headerMenu === 'theme' ? 'true' : 'false'}"
+								aria-label="Theme"
+								title="Theme"
+							>☼</button>
+							${
+								state.ui.headerMenu === 'theme'
+									? `
+								<div class="menu" role="menu">
+									<button type="button" role="menuitem" class="${state.settings.themeId === 'system' ? 'is-active' : ''}" data-action="set-theme" data-theme-id="system">System</button>
+									<button type="button" role="menuitem" class="${state.settings.themeId === 'light' ? 'is-active' : ''}" data-action="set-theme" data-theme-id="light">Light</button>
+									<button type="button" role="menuitem" class="${state.settings.themeId === 'dark' ? 'is-active' : ''}" data-action="set-theme" data-theme-id="dark">Dark</button>
+									<div class="menu-divider"></div>
+									<button type="button" role="menuitem" data-action="open-settings">More themes…</button>
+								</div>
+							`
+									: ''
+							}
+						</div>
+						<button type="button" class="icon-btn icon-btn-header" data-action="open-settings" aria-label="Settings" title="Settings">⋯</button>
 					</div>
 				</div>
 			</header>
@@ -766,13 +921,14 @@ export function renderApp(state: AppState): string {
 				<nav class="date-nav" aria-label="${navLabel}">
 					<button type="button" class="icon-btn nav-arrow" data-action="prev-day" aria-label="${prevLabel}">‹</button>
 					<div class="date-center">
-						<span class="date-button">${esc(dateLabel)}</span>
+						<button type="button" class="date-button" data-action="open-date-picker" aria-label="Choose date">${esc(dateLabel)}</button>
 						<input
 							class="date-hidden"
 							type="date"
 							data-action="pick-date"
 							value="${attr(state.date)}"
 							aria-label="Choose date"
+							tabindex="-1"
 						/>
 					</div>
 					<button type="button" class="icon-btn nav-arrow" data-action="next-day" aria-label="${nextLabel}">›</button>
@@ -784,6 +940,7 @@ export function renderApp(state: AppState): string {
 			</main>
 			${renderSettings(state)}
 			${renderDialog(state)}
+			${renderShortcuts(state)}
 		</div>
 	`;
 }
@@ -799,19 +956,13 @@ export function applyFocus(root: HTMLElement, focus: string | null, editing: Edi
 	}
 }
 
-let scrolledDayKey = '';
-
-export function applyCalendarScroll(root: HTMLElement, date: string, view: PlannerView): void {
-	if (view !== 'day') {
-		scrolledDayKey = '';
-		return;
-	}
-	const key = `day:${date}`;
-	if (scrolledDayKey === key) return;
+export function applyCalendarScroll(root: HTMLElement, view: PlannerView): void {
+	if (view !== 'day') return;
 	const scroller = root.querySelector('.day-scroll');
 	const selected = root.querySelector('.cal-event.is-selected');
 	const nowLine = root.querySelector('.cal-now');
-	const target = selected ?? nowLine;
+	const firstEvent = root.querySelector('.cal-event');
+	const target = selected ?? nowLine ?? firstEvent;
 	if (!(scroller instanceof HTMLElement) || !(target instanceof HTMLElement)) return;
 
 	const align = () => {
@@ -819,7 +970,6 @@ export function applyCalendarScroll(root: HTMLElement, date: string, view: Plann
 		const tRect = target.getBoundingClientRect();
 		if (sRect.height < 8) return false;
 		scroller.scrollTop += tRect.top + tRect.height / 2 - (sRect.top + sRect.height / 2);
-		scrolledDayKey = key;
 		return true;
 	};
 
@@ -830,4 +980,15 @@ export function applyCalendarScroll(root: HTMLElement, date: string, view: Plann
 			align();
 		});
 	});
+}
+
+export function applySelectionVisibility(
+	root: HTMLElement,
+	view: PlannerView,
+	selectedBlockId: string | null,
+): void {
+	if (view !== 'list' || !selectedBlockId) return;
+	const el = root.querySelector<HTMLElement>(`.block[data-block-id="${CSS.escape(selectedBlockId)}"]`);
+	if (!el) return;
+	el.scrollIntoView({ block: 'nearest' });
 }

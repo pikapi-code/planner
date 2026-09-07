@@ -91,6 +91,8 @@ export interface UiState {
 	editing: EditTarget | null;
 	dialog: DialogState;
 	settingsOpen: boolean;
+	shortcutsOpen: boolean;
+	headerMenu: 'io' | 'theme' | null;
 	themeEditor: ThemeEditorState | null;
 	composer: ComposerState;
 	focus: string | null;

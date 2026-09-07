@@ -27,6 +27,8 @@ export function initialUi(plan: DayPlan, dayStart: string): UiState {
 		editing: null,
 		dialog: null,
 		settingsOpen: false,
+		shortcutsOpen: false,
+		headerMenu: null,
 		themeEditor: null,
 		composer: closedComposer(plan, dayStart),
 		focus: null,
@@ -61,9 +63,9 @@ export function createStore(): Store {
 
 	const listeners = new Set<() => void>();
 
-	function persist(next: AppState) {
-		savePlans(next.plans);
-		saveSettings(next.settings);
+	function persist(prev: AppState, next: AppState) {
+		if (next.plans !== prev.plans) savePlans(next.plans);
+		if (next.settings !== prev.settings) saveSettings(next.settings);
 	}
 
 	return {
@@ -78,10 +80,11 @@ export function createStore(): Store {
 			return () => listeners.delete(listener);
 		},
 		set(updater, options) {
-			const next = updater(state);
-			if (next === state) return;
+			const prev = state;
+			const next = updater(prev);
+			if (next === prev) return;
 			state = next;
-			persist(state);
+			persist(prev, next);
 			if (!options?.silent) {
 				for (const listener of listeners) listener();
 			}

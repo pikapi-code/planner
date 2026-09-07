@@ -6,19 +6,21 @@ import {
 	findNextFreeSlot,
 	reorderBlocks,
 	reorderSubtasks,
+	sortBlocks,
 	validateHoursAndStart,
 	validateRange,
 	withUpdatedBlock,
 	suggestedStartTime,
 } from '../lib/planner';
 import { createId } from '../lib/ids';
-import { emptyDay } from '../lib/storage';
+import { buildExport, emptyDay, parseImportedExport } from '../lib/storage';
 import { applyTheme, currentTokensSnapshot } from '../lib/themes';
 import {
 	addDays,
 	addMonths,
 	blockDurationMinutes,
 	DEFAULT_DURATION_HOURS,
+	diffDays,
 	formatDisplayTime,
 	formatHHmm,
 	joinTime,
@@ -30,8 +32,8 @@ import {
 	todayISO,
 } from '../lib/time';
 import type { DayPlan, PlannerView, ThemeTokens, TimeBlock } from '../lib/types';
-import { applyFocus, applyCalendarScroll, renderApp } from './view';
-import { closedComposer, createStore, type AppState, type Store } from './store';
+import { applyFocus, applyCalendarScroll, applySelectionVisibility, renderApp } from './view';
+import { closedComposer, createStore, initialUi, type AppState, type Store } from './store';
 import { minutesFromCanvasY, snapMinutes, isEventColorId } from '../lib/calendar';
 
 function planOf(state: AppState): DayPlan {
@@ -47,6 +49,64 @@ function writePlan(state: AppState, plan: DayPlan): AppState {
 
 function updateBlock(state: AppState, blockId: string, patch: Partial<TimeBlock>): AppState {
 	return writePlan(state, withUpdatedBlock(planOf(state), blockId, patch));
+}
+
+function moveBlock(state: AppState, blockId: string, direction: 'up' | 'down'): AppState {
+	const plan = planOf(state);
+	const sorted = sortBlocks(plan.blocks);
+	const index = sorted.findIndex((block) => block.id === blockId);
+	if (index === -1) return state;
+	const targetIndex = direction === 'up' ? index - 1 : index + 1;
+	if (targetIndex < 0 || targetIndex >= sorted.length) return state;
+	const beforeId = direction === 'up' ? sorted[targetIndex].id : (sorted[targetIndex + 1]?.id ?? null);
+	return writePlan(state, { ...plan, blocks: reorderBlocks(plan.blocks, blockId, beforeId) });
+}
+
+type EditStep =
+	| { type: 'task'; focus: string }
+	| { type: 'subtask'; subtaskId: string; focus: string };
+
+function editSequence(block: TimeBlock): EditStep[] {
+	const steps: EditStep[] = [{ type: 'task', focus: `task-${block.id}` }];
+	const sorted = [...block.subtasks].sort((a, b) => a.order - b.order);
+	for (const subtask of sorted) {
+		steps.push({ type: 'subtask', subtaskId: subtask.id, focus: `subtask-${subtask.id}` });
+	}
+	return steps;
+}
+
+function navigateEditField(store: Store, blockId: string, fromIndex: number, direction: 1 | -1) {
+	const block = planOf(store.get()).blocks.find((item) => item.id === blockId);
+	if (!block) return;
+	const steps = editSequence(block);
+	const nextIndex = fromIndex + direction;
+	if (nextIndex < 0 || nextIndex >= steps.length) return;
+	const step = steps[nextIndex];
+	store.set((state) => ({
+		...state,
+		ui: {
+			...state.ui,
+			editing:
+				step.type === 'task'
+					? { type: 'task', blockId }
+					: { type: 'subtask', blockId, subtaskId: step.subtaskId },
+			focus: step.focus,
+			selectedBlockId: blockId,
+			menuBlockId: null,
+		},
+	}));
+}
+
+function downloadJson(data: unknown, filename: string) {
+	const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+	const url = URL.createObjectURL(blob);
+	const link = document.createElement('a');
+	link.href = url;
+	link.download = filename;
+	document.body.appendChild(link);
+	link.click();
+	link.remove();
+	URL.revokeObjectURL(url);
 }
 
 function isTypingTarget(target: EventTarget | null): boolean {
@@ -189,7 +249,8 @@ export function mountPlanner(root: HTMLElement): void {
 		const state = store.get();
 		root.innerHTML = renderApp(state);
 		applyFocus(root, state.ui.focus, state.ui.editing);
-		applyCalendarScroll(root, state.date, state.settings.view);
+		applyCalendarScroll(root, state.settings.view);
+		applySelectionVisibility(root, state.settings.view, state.ui.selectedBlockId);
 	}
 
 	store.subscribe(render);
@@ -207,9 +268,11 @@ export function mountPlanner(root: HTMLElement): void {
 	root.addEventListener('click', (event) => {
 		const actionEl = closestAction(event.target);
 		if (!actionEl) {
-			if (event.target instanceof Element && !event.target.closest('.menu, .menu-wrap')) {
+			if (event.target instanceof Element && !event.target.closest('.menu, .menu-wrap, .header-menu-wrap')) {
 				store.set((state) =>
-					state.ui.menuBlockId ? { ...state, ui: { ...state.ui, menuBlockId: null } } : state,
+					state.ui.menuBlockId || state.ui.headerMenu
+						? { ...state, ui: { ...state.ui, menuBlockId: null, headerMenu: null } }
+						: state,
 				);
 			}
 			return;
@@ -220,6 +283,24 @@ export function mountPlanner(root: HTMLElement): void {
 		const subtaskId = actionEl.dataset.subtaskId;
 
 		if (action === 'pick-date') return;
+
+		if (action === 'export-data') {
+			store.set((current) =>
+				current.ui.headerMenu ? { ...current, ui: { ...current.ui, headerMenu: null } } : current,
+			);
+			const state = store.get();
+			const plan = state.plans[state.date] ?? emptyDay(state.date);
+			downloadJson(buildExport({ [state.date]: plan }, state.settings), `planner-export-${state.date}.json`);
+			return;
+		}
+
+		if (action === 'trigger-import') {
+			store.set((current) =>
+				current.ui.headerMenu ? { ...current, ui: { ...current.ui, headerMenu: null } } : current,
+			);
+			root.querySelector<HTMLInputElement>('[data-action="import-file-input"]')?.click();
+			return;
+		}
 
 		if (action === 'day-canvas') {
 			if (event.target instanceof Element && event.target.closest('.cal-event')) return;
@@ -287,6 +368,14 @@ export function mountPlanner(root: HTMLElement): void {
 
 		if (target.dataset.action === 'pick-date' && target.value) {
 			store.set((state) => changeDate(state, target.value));
+			return;
+		}
+
+		if (target instanceof HTMLInputElement && target.dataset.action === 'import-file-input') {
+			const file = target.files?.[0];
+			target.value = '';
+			if (!file) return;
+			void handleImportFile(store, file);
 			return;
 		}
 
@@ -372,6 +461,30 @@ export function mountPlanner(root: HTMLElement): void {
 			store.set(openComposer);
 			return;
 		}
+		if (event.key === '?') {
+			event.preventDefault();
+			store.set((state) => ({ ...state, ui: { ...state.ui, shortcutsOpen: !state.ui.shortcutsOpen } }));
+			return;
+		}
+		if (event.key === 'Enter') {
+			const state = store.get();
+			if (state.ui.dialog?.type === 'delete-block') {
+				event.preventDefault();
+				store.set(confirmDelete);
+				return;
+			}
+			if (state.ui.editing || state.ui.composer.open || state.ui.dialog || state.ui.settingsOpen || state.ui.shortcutsOpen) {
+				return;
+			}
+			const selected = state.ui.selectedBlockId;
+			if (!selected) return;
+			event.preventDefault();
+			store.set((current) => ({
+				...current,
+				ui: { ...current.ui, editing: { type: 'task', blockId: selected }, focus: `task-${selected}`, menuBlockId: null },
+			}));
+			return;
+		}
 		if (event.key === 't' || event.key === 'T') {
 			event.preventDefault();
 			store.set((state) => changeDate(state, todayISO()));
@@ -404,8 +517,10 @@ export function mountPlanner(root: HTMLElement): void {
 					...state.ui,
 					editing: null,
 					menuBlockId: null,
+					headerMenu: null,
 					dialog: null,
 					settingsOpen: false,
+					shortcutsOpen: false,
 					themeEditor: null,
 					composer: state.ui.composer.open
 						? closedComposer(planOf(state), state.settings.dayStart)
@@ -413,6 +528,23 @@ export function mountPlanner(root: HTMLElement): void {
 					focus: null,
 				},
 			}));
+			return;
+		}
+		if (event.key === 'ArrowUp' || event.key === 'ArrowDown') {
+			if (store.get().settings.view === 'month') return;
+			event.preventDefault();
+			const direction = event.key === 'ArrowDown' ? 1 : -1;
+			store.set((state) => {
+				const blocks = sortBlocks(planOf(state).blocks);
+				if (blocks.length === 0) return state;
+				const currentIndex = blocks.findIndex((block) => block.id === state.ui.selectedBlockId);
+				const nextIndex = currentIndex === -1 ? (direction === 1 ? 0 : blocks.length - 1) : currentIndex + direction;
+				if (nextIndex < 0 || nextIndex >= blocks.length) return state;
+				return {
+					...state,
+					ui: { ...state.ui, selectedBlockId: blocks[nextIndex].id, menuBlockId: null },
+				};
+			});
 			return;
 		}
 		if (event.key === 'Delete' || event.key === 'Backspace') {
@@ -488,12 +620,23 @@ function handleClick(
 		case 'set-hour12':
 			return { ...state, settings: { ...state.settings, hour12: el.dataset.value === 'true' } };
 		case 'open-settings':
-			return { ...state, ui: { ...state.ui, settingsOpen: true, menuBlockId: null } };
+			return { ...state, ui: { ...state.ui, settingsOpen: true, menuBlockId: null, headerMenu: null } };
 		case 'close-settings':
 			return { ...state, ui: { ...state.ui, settingsOpen: false, themeEditor: null } };
+		case 'open-shortcuts':
+			return { ...state, ui: { ...state.ui, shortcutsOpen: true, menuBlockId: null, headerMenu: null } };
+		case 'close-shortcuts':
+			return { ...state, ui: { ...state.ui, shortcutsOpen: false } };
+		case 'toggle-io-menu':
+			return { ...state, ui: { ...state.ui, headerMenu: state.ui.headerMenu === 'io' ? null : 'io', menuBlockId: null } };
+		case 'toggle-theme-menu':
+			return {
+				...state,
+				ui: { ...state.ui, headerMenu: state.ui.headerMenu === 'theme' ? null : 'theme', menuBlockId: null },
+			};
 		case 'set-theme': {
 			const themeId = el.dataset.themeId ?? 'system';
-			const next = { ...state, settings: { ...state.settings, themeId } };
+			const next = { ...state, settings: { ...state.settings, themeId }, ui: { ...state.ui, headerMenu: null } };
 			queueMicrotask(() => applyTheme(themeId, next.settings.customThemes));
 			return next;
 		}
@@ -540,6 +683,12 @@ function handleClick(
 			if (!blockId) return state;
 			if (state.ui.selectedBlockId === blockId && !state.ui.menuBlockId) return state;
 			return { ...state, ui: { ...state.ui, selectedBlockId: blockId, menuBlockId: null } };
+		case 'move-block-up':
+			if (!blockId) return state;
+			return moveBlock(state, blockId, 'up');
+		case 'move-block-down':
+			if (!blockId) return state;
+			return moveBlock(state, blockId, 'down');
 		case 'toggle-menu':
 			if (!blockId) return state;
 			return {
@@ -743,6 +892,45 @@ function handleLocalKey(store: Store, event: KeyboardEvent) {
 		return;
 	}
 
+	const isNavKey =
+		event.key === 'ArrowUp' || event.key === 'ArrowDown' || event.key === 'ArrowLeft' || event.key === 'ArrowRight';
+	if (isNavKey && (target.dataset.action === 'task-title' || target.dataset.action === 'subtask-title')) {
+		const blockId = target.dataset.blockId;
+		if (!blockId) return;
+		const block = planOf(store.get()).blocks.find((item) => item.id === blockId);
+		if (!block) return;
+		const steps = editSequence(block);
+		const currentIndex =
+			target.dataset.action === 'task-title'
+				? 0
+				: steps.findIndex((step) => step.type === 'subtask' && step.subtaskId === target.dataset.subtaskId);
+		if (currentIndex === -1) return;
+
+		if (event.key === 'ArrowDown') {
+			event.preventDefault();
+			navigateEditField(store, blockId, currentIndex, 1);
+			return;
+		}
+		if (event.key === 'ArrowUp') {
+			event.preventDefault();
+			navigateEditField(store, blockId, currentIndex, -1);
+			return;
+		}
+		const atStart = target.selectionStart === 0 && target.selectionEnd === 0;
+		const atEnd = target.selectionStart === target.value.length && target.selectionEnd === target.value.length;
+		if (event.key === 'ArrowRight' && atEnd) {
+			event.preventDefault();
+			navigateEditField(store, blockId, currentIndex, 1);
+			return;
+		}
+		if (event.key === 'ArrowLeft' && atStart) {
+			event.preventDefault();
+			navigateEditField(store, blockId, currentIndex, -1);
+			return;
+		}
+		return;
+	}
+
 	if (target.dataset.action === 'composer-hours' && event.key === 'Enter') {
 		event.preventDefault();
 		store.set((state) => ({ ...state, ui: { ...state.ui, focus: 'composer-start' } }));
@@ -925,6 +1113,66 @@ function deleteCustomTheme(state: AppState): AppState {
 	};
 	queueMicrotask(() => applyTheme(next.settings.themeId, next.settings.customThemes));
 	return next;
+}
+
+async function handleImportFile(store: Store, file: File): Promise<void> {
+	let parsed: unknown;
+	try {
+		parsed = JSON.parse(await file.text());
+	} catch {
+		store.set((state) => ({ ...state, ui: { ...state.ui, notice: 'That file is not valid JSON.' } }));
+		return;
+	}
+	const imported = parseImportedExport(parsed);
+	if (!imported) {
+		store.set((state) => ({ ...state, ui: { ...state.ui, notice: 'That file is not a valid planner export.' } }));
+		return;
+	}
+	if (imported.importedDayCount === 0) {
+		store.set((state) => ({
+			...state,
+			ui: {
+				...state.ui,
+				notice:
+					'No day plans were found in that file. Each date needs a "blocks" array — check the JSON structure.',
+			},
+		}));
+		return;
+	}
+	const importedDates = Object.keys(imported.plans).sort();
+	const isSingleDay = importedDates.length === 1;
+	const confirmed = window.confirm(
+		isSingleDay
+			? `Import this file? It will replace your settings and place that day's plan on the day you're viewing.`
+			: `Import this file? It will replace your settings and restore ${imported.importedDayCount} day(s) of plans on their original dates.`,
+	);
+	if (!confirmed) return;
+	store.set((state) => {
+		const latest = importedDates[importedDates.length - 1];
+		const shift = isSingleDay && latest ? diffDays(latest, state.date) : 0;
+		const shiftedPlans: Record<string, DayPlan> = {};
+		for (const originalDate of importedDates) {
+			const date = shift ? addDays(originalDate, shift) : originalDate;
+			shiftedPlans[date] = { ...imported.plans[originalDate], date };
+		}
+		const plans = { ...state.plans, ...shiftedPlans };
+		const plan = plans[state.date] ?? emptyDay(state.date);
+		const firstBlockId = sortBlocks(plan.blocks)[0]?.id ?? null;
+		queueMicrotask(() => applyTheme(imported.settings.themeId, imported.settings.customThemes));
+		const skippedNote = imported.skippedEntryCount
+			? ` (skipped ${imported.skippedEntryCount} invalid entr${imported.skippedEntryCount === 1 ? 'y' : 'ies'})`
+			: '';
+		return {
+			...state,
+			plans,
+			settings: imported.settings,
+			ui: {
+				...initialUi(plan, imported.settings.dayStart),
+				selectedBlockId: firstBlockId,
+				notice: `Imported ${imported.importedDayCount} day(s)${skippedNote}.`,
+			},
+		};
+	});
 }
 
 function bindDrag(root: HTMLElement, store: Store) {
