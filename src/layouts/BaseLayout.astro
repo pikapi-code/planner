@@ -1,0 +1,31 @@
+---
+import '../styles/global.css';
+import '../styles/planner.css';
+import { themeInitScript } from '../scripts/theme-init';
+
+interface Props {
+	title: string;
+	description?: string;
+}
+
+const { title, description = 'A daily time-blocking planner for tasks and subtasks.' } = Astro.props;
+---
+
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="UTF-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1" />
+		<link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+		<meta name="generator" content={Astro.generator} />
+		<meta name="description" content={description} />
+		<title>{title}</title>
+		<meta name="theme-color" content="#fafafa" media="(prefers-color-scheme: light)" />
+		<meta name="theme-color" content="#0a0a0a" media="(prefers-color-scheme: dark)" />
+		<script is:inline set:html={themeInitScript()} />
+	</head>
+	<body>
+		<a class="skip-link" href="#main">Skip to main content</a>
+		<slot />
+	</body>
+</html>

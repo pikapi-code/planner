@@ -1,0 +1,14 @@
+---
+import BaseLayout from '../layouts/BaseLayout.astro';
+---
+
+<BaseLayout title="Time Blocker">
+	<div id="planner-root"></div>
+</BaseLayout>
+
+<script>
+	import { mountPlanner } from '../planner/main';
+
+	const root = document.getElementById('planner-root');
+	if (root) mountPlanner(root);
+</script>
