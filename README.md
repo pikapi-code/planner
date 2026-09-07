@@ -1,8 +1,8 @@
-# Time Blocker
+# Planner
 
 A daily time-blocking planner. Plan a day as time blocks, each with one primary task and a list of subtasks.
 
-Data stays in the browser (`localStorage`). No account required.
+Switch between list, day, and month views. Data stays in the browser (`localStorage`). No account required.
 
 ## Commands
 

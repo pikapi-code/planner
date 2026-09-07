@@ -748,8 +748,8 @@ export function renderApp(state: AppState): string {
 			<header class="app-header">
 				<div class="container header-row">
 					<div class="brand">
-						<p class="caption-mono">Daily planner</p>
-						<h1>Time Blocker</h1>
+						<p class="caption-mono">Time blocking</p>
+						<h1>Planner</h1>
 					</div>
 					<div class="header-actions">
 						${viewSwitcher(state.settings.view)}
