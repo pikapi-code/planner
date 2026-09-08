@@ -39,10 +39,6 @@
 	gap: var(--space-sm);
 }
 
-.app.is-calendar {
-	--max-width: 1180px;
-}
-
 .app.is-day,
 .app.is-month {
 	display: flex;
@@ -94,6 +90,7 @@
 .date-button {
 	display: block;
 	width: 100%;
+	overflow: hidden;
 	padding: var(--space-xs) var(--space-md);
 	font-size: 1.25rem;
 	font-weight: 600;
@@ -103,6 +100,8 @@
 	border: none;
 	border-radius: var(--radius-sm);
 	cursor: pointer;
+	white-space: nowrap;
+	text-overflow: ellipsis;
 }
 
 .date-center:hover .date-button {
@@ -1444,6 +1443,25 @@ kbd {
 
 	.header-actions {
 		width: 100%;
-		justify-content: flex-start;
+		justify-content: center;
+	}
+
+	.header-actions .view-switcher {
+		flex: 1 1 100%;
+		justify-content: center;
+	}
+
+	.header-actions .menu {
+		right: auto;
+		left: 0;
+	}
+
+	.date-center {
+		min-width: 0;
+		flex: 1 1 0%;
+	}
+
+	.date-button {
+		font-size: 1.0625rem;
 	}
 }

@@ -578,7 +578,8 @@ function renderShortcuts(state: AppState): string {
 				['N', 'Add a new time block'],
 				['Enter', 'Edit the selected block’s task'],
 				['↑ ↓ ← →', 'While editing, move between the task and its subtasks'],
-				['Enter (while editing)', 'Add a new subtask'],
+				['Enter (editing task)', 'Save and stop editing'],
+				['Enter (editing subtask)', 'Save and add another subtask'],
 				['Delete / Backspace', 'Delete the selected block'],
 				['Esc', 'Close editing, menus, or dialogs'],
 			],
@@ -588,6 +589,8 @@ function renderShortcuts(state: AppState): string {
 			rows: [
 				['?', 'Toggle this shortcuts panel'],
 				['Drag the grip', 'Reorder blocks or subtasks'],
+				['Ctrl/⌘ Z', 'Undo'],
+				['Ctrl/⌘ Y or Ctrl/⌘ Shift Z', 'Redo'],
 			],
 		},
 	];
@@ -949,11 +952,13 @@ export function applyFocus(root: HTMLElement, focus: string | null, editing: Edi
 	if (!focus) return;
 	const el = root.querySelector<HTMLElement>(`[data-focus="${CSS.escape(focus)}"]`);
 	if (!el) return;
-	el.focus();
+	el.focus({ preventScroll: true });
 	if (el instanceof HTMLInputElement) {
 		const shouldSelect = editing?.type === 'task' || editing?.type === 'subtask' || focus === 'composer-hours';
 		if (shouldSelect) el.select();
 	}
+	const scrollTarget = el.closest<HTMLElement>('[data-composer]') ?? el;
+	scrollTarget.scrollIntoView({ block: 'nearest', behavior: 'instant' });
 }
 
 export function applyCalendarScroll(root: HTMLElement, view: PlannerView): void {

@@ -145,6 +145,7 @@ function openComposer(state: AppState): AppState {
 			editing: null,
 			focus: 'composer-hours',
 			settingsOpen: false,
+			selectedBlockId: null,
 		},
 	};
 }
@@ -455,6 +456,17 @@ export function mountPlanner(root: HTMLElement): void {
 	bindDrag(root, store);
 
 	document.addEventListener('keydown', (event) => {
+		const mod = event.ctrlKey || event.metaKey;
+		if (mod && !event.shiftKey && (event.key === 'z' || event.key === 'Z')) {
+			event.preventDefault();
+			store.undo();
+			return;
+		}
+		if (mod && ((event.key === 'y' || event.key === 'Y') || (event.shiftKey && (event.key === 'z' || event.key === 'Z')))) {
+			event.preventDefault();
+			store.redo();
+			return;
+		}
 		if (isTypingTarget(event.target)) return;
 		if (event.key === 'n' || event.key === 'N') {
 			event.preventDefault();
@@ -939,9 +951,7 @@ function handleLocalKey(store: Store, event: KeyboardEvent) {
 
 	if (target.dataset.action === 'task-title' && event.key === 'Enter') {
 		event.preventDefault();
-		const blockId = target.dataset.blockId;
-		if (!blockId) return;
-		store.set((state) => addSubtask({ ...state, ui: { ...state.ui, editing: null } }, blockId));
+		store.set((state) => ({ ...state, ui: { ...state.ui, editing: null, focus: null } }));
 		return;
 	}
 
@@ -1147,6 +1157,7 @@ async function handleImportFile(store: Store, file: File): Promise<void> {
 			: `Import this file? It will replace your settings and restore ${imported.importedDayCount} day(s) of plans on their original dates.`,
 	);
 	if (!confirmed) return;
+	store.clearHistory();
 	store.set((state) => {
 		const latest = importedDates[importedDates.length - 1];
 		const shift = isSingleDay && latest ? diffDays(latest, state.date) : 0;

@@ -44,7 +44,13 @@ export type Store = {
 	plan: () => DayPlan;
 	subscribe: (listener: () => void) => () => void;
 	set: (updater: (state: AppState) => AppState, options?: { silent?: boolean }) => void;
+	undo: () => void;
+	redo: () => void;
+	clearHistory: () => void;
 };
+
+const HISTORY_LIMIT = 100;
+const COALESCE_MS = 600;
 
 export function createStore(): Store {
 	const plans = loadPlans();
@@ -68,6 +74,34 @@ export function createStore(): Store {
 		if (next.settings !== prev.settings) saveSettings(next.settings);
 	}
 
+	let undoStack: PlansByDate[] = [];
+	let redoStack: PlansByDate[] = [];
+	let pendingBefore: PlansByDate | null = null;
+	let coalesceTimer: number | null = null;
+	let applyingHistory = false;
+
+	function commitPending() {
+		if (coalesceTimer != null) {
+			window.clearTimeout(coalesceTimer);
+			coalesceTimer = null;
+		}
+		if (pendingBefore && pendingBefore !== state.plans) {
+			undoStack.push(pendingBefore);
+			if (undoStack.length > HISTORY_LIMIT) undoStack.shift();
+			redoStack = [];
+		}
+		pendingBefore = null;
+	}
+
+	function scheduleCommit() {
+		if (coalesceTimer != null) window.clearTimeout(coalesceTimer);
+		coalesceTimer = window.setTimeout(commitPending, COALESCE_MS);
+	}
+
+	function notify() {
+		for (const listener of listeners) listener();
+	}
+
 	return {
 		get() {
 			return state;
@@ -83,11 +117,46 @@ export function createStore(): Store {
 			const prev = state;
 			const next = updater(prev);
 			if (next === prev) return;
+			if (!applyingHistory && next.plans !== prev.plans) {
+				if (pendingBefore === null) pendingBefore = prev.plans;
+				scheduleCommit();
+			}
 			state = next;
 			persist(prev, next);
-			if (!options?.silent) {
-				for (const listener of listeners) listener();
+			if (!options?.silent) notify();
+		},
+		undo() {
+			commitPending();
+			const prevPlans = undoStack.pop();
+			if (!prevPlans) return;
+			redoStack.push(state.plans);
+			const prev = state;
+			applyingHistory = true;
+			state = { ...state, plans: prevPlans, ui: { ...state.ui, editing: null, focus: null } };
+			persist(prev, state);
+			applyingHistory = false;
+			notify();
+		},
+		redo() {
+			commitPending();
+			const nextPlans = redoStack.pop();
+			if (!nextPlans) return;
+			undoStack.push(state.plans);
+			const prev = state;
+			applyingHistory = true;
+			state = { ...state, plans: nextPlans, ui: { ...state.ui, editing: null, focus: null } };
+			persist(prev, state);
+			applyingHistory = false;
+			notify();
+		},
+		clearHistory() {
+			if (coalesceTimer != null) {
+				window.clearTimeout(coalesceTimer);
+				coalesceTimer = null;
 			}
+			pendingBefore = null;
+			undoStack = [];
+			redoStack = [];
 		},
 	};
 }
