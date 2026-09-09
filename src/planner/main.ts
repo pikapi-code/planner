@@ -467,6 +467,21 @@ export function mountPlanner(root: HTMLElement): void {
 			store.redo();
 			return;
 		}
+		if (mod && (event.key === 'l' || event.key === 'L')) {
+			event.preventDefault();
+			store.set((state) => setView(state, 'list'));
+			return;
+		}
+		if (mod && (event.key === 'd' || event.key === 'D')) {
+			event.preventDefault();
+			store.set((state) => setView(state, 'day'));
+			return;
+		}
+		if (mod && (event.key === 'm' || event.key === 'M')) {
+			event.preventDefault();
+			store.set((state) => setView(state, 'month'));
+			return;
+		}
 		if (isTypingTarget(event.target)) return;
 		if (event.key === 'n' || event.key === 'N') {
 			event.preventDefault();
